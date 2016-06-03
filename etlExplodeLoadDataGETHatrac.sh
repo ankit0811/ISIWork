@@ -171,6 +171,7 @@ explodeFCS()
 		then
 			for files in "${PROCESSED_DIR}/${baseName}"*".FCS"
 			do
+				echo "files in loop=" "${files}"
 				getFileName "${files}"
 			done
 	
@@ -298,8 +299,8 @@ getFileName(){
 				if [ $? -eq 0 ]
 				then
 					echo "Hatrac name Space create, SUCCESS"
-						
-					insertFileToDB ${constructId} ${biomassId} ${indexId} ${fcsURL} ${jsonURL} "${singleRawFileName}" ${digestSHA256}
+				 	echo "singleRawFileName="${singleRawFileName}		
+					insertFileToDB "${constructId}" "${biomassId}" "${indexId}" "${fcsURL}" "${jsonURL}" "${singleRawFileName}" "${digestSHA256}"
 	
 				fi
 			else
@@ -399,7 +400,8 @@ insertFileToDB(){
 	sha256=${7}
 	OrigFileName="${6}"
 	fileName="${OrigFileName}.csv"
-	
+	echo "filename="${fileName}
+	echo "FILENAME=====>"${6} "SHA=====>" ${7}
 	sudo su -c "psql ${DATABASE}" - ${GPCR_USER} << EOF
 	
         insert into ${ASSETS_SCHEMA}.fcs_file(site_id,construct_id,biomass_id,well_id,fcs_uri,json_uri,sha256)
@@ -498,7 +500,7 @@ sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
                end||','||
 	       filename
 	from ${ASSETS_SCHEMA}.fcs_source
---	where filename='exptTest254.FCS'
+--	where filename='exptTest464.FCS'
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
 			    where name in ('retry','new')) limit 100;
