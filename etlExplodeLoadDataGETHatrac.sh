@@ -32,27 +32,29 @@ ERROR=1
 
 
 : '
+writeLog()		 -->  for logging Error.lopg and Success.log
+checkNullValue()	 -->  checks if the variables have been assigned any value. If not calls writeLog and reports an error:2
+checkFileSize()		 -->  checks if the file to be loaded have data or not depending on its file size. If not call writeLog and reports an error:1
+checkValuesDB()		 -->  checks if the value extracted from the file meta data is present in its respective table. If logs reports an error:4
 getTargetID()            -->  generates the Target ID using the tables iobox_data.construct, iobox_data.site, iobox_data.target, iobox_data.targetlist
 explodeFCS()	         -->  Uses "ProcessRawFCS utility to explode the FCS file into FCS,json,csv file"
 getFileName()	         -->  Extracts the metadata from the file name and calls creataHatracnameSpace, InsertFileSourceDB, InsertFileStatDB()
 createHatracNameSpace()  -->  Uses hatarac_util.sh to create the namespace on hatarac
-InsertFileSourceDB()	 -->  Inserts data into assets.fcs_source
-InsertFileStatDB	 -->  Inserts data into assets.fcs_stat table
+InsertFileToDB()	 -->  Inserts data into assets.fcs_source and fcs_stats. For fcs_stats, it creates a temp table and then transforms the data for loading.
+getHatracFiles()	 -->  reads the url from fcs_source and generates the .FCS file with the name as that of filename from fcs_source table.
 getDigestfromDB()	 -->  gets the exisiting value of the digest fro the exisiting file and returns true or false
 updateSourceStatusDB()	 -->  Insert data into assets.assets_status table with 1=new, updates the entry depending on the status 2=processed,3=retry and 4=error
 
 Code Flow:
-1. getSiteName
-2. explodeFCS
-3. getFileName #main controller
+1. Reads data from fcs_source to get filenames from hatrac system
+2. getHatracFiles()
+3. explodeFCS
+4. getFileName #main controller
 	i.	 getTargetId
-	ii.  	 getSitePrefix
-	iii.	 getDigestfromDB
-	iv.	 upsertSourceStatusDB
-	v.	 createHatracNameSpace
-	vi.	 insertFileSourceDB
-	vii.	 insertFileStatDB
-
+	ii.	 getDigestfromDB
+	iii.	 createHatracNameSpace
+	iv.	 insertFileToDB
+5. updateSourceStatusDB()
 '
 
 
@@ -502,11 +504,11 @@ sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
 --	where filename='exptTest464.FCS'
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
-			    where name in ('retry')) limit 100;
+			    where name in ('retry','new')) limit 100;
 EOF
 
 
-	for readLine in $(cat inputSourceFile.csv)
+	for readLine in $(cat ${TEMP_FILE_SOURCE})
 	do
 		#Reset Global Variables
 		STM=$(date +%s)
