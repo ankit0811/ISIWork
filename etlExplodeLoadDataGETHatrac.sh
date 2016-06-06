@@ -113,7 +113,10 @@ checkValuesDB(){
 	tabName=${1}
 	colValue=${2}
 	qryString="Select count(1) from ${tabName} where id='${2}' and site_prov='${siteId}'";
-
+	if [ ${tabName} == "${IOBOX_SCHEMA}.biomassprodbatch" ]
+	then
+		qryString="Select count(1) from ${tabName} where id='${2}' and constructid='${3}' and site_prov='${siteId}'";
+	fi
 	count=$(sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF
 		${qryString};
 EOF
@@ -284,7 +287,7 @@ getFileName(){
 	if [ $(checkNullValue "${constructId}" constructId) == "true" -a $(checkNullValue "${biomassId}" biomassId) == "true" -a $(checkNullValue "${indexId}" indexId) == "true" ]
 	then
 		
-		if [ $(checkValuesDB ${IOBOX_SCHEMA}.construct ${constructId}) == "true" -a $(checkValuesDB ${IOBOX_SCHEMA}.biomassprodbatch ${biomassId}) == "true" ]		
+		if [ $(checkValuesDB ${IOBOX_SCHEMA}.construct ${constructId}) == "true" -a $(checkValuesDB ${IOBOX_SCHEMA}.biomassprodbatch ${biomassId} ${constructId}) == "true" ]		
 		then
 
 			digestSHA256=$(sha256sum "${singleRawFileName}" | cut -d ' ' -f1)

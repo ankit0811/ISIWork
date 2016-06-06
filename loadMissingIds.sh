@@ -7,12 +7,12 @@ TMPFILE=tempBiomassLoad
 if [ ${2} -eq 1 ]
 then
 
-	QrySt="insert into iobox_data.biomassprodbatch (id,site_prov) values("
+	QrySt="insert into iobox_data.biomassprodbatch (constructid,id,site_prov) values("
 
 
 	rm -f BiomassLoad.sql
 
-	ls ${PATH1}/${1}*.FCS | cut -d "_" -f6 | sort | uniq >${TMPFILE}
+	ls ${PATH1}/${1}*.FCS | cut -d "_" -f5-6 | sed 's/[^0-9_]*//g' | sed 's/_/,/g' | sort | uniq >${TMPFILE}
 
 	for readLine in $(cat ${TMPFILE})
 	do
