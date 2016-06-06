@@ -137,7 +137,8 @@ chk_hatrac_access(){
 add_file_to_hatrac()
 {
 
-    hatrac_url="$1"
+    hatrac_url=$(echo "$1" | sed 's/ /%20/g')
+	
     filename="$2"
     mimetype=$(file --mime-type -b "${filename}")
     
