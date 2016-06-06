@@ -390,7 +390,6 @@ createHatracNameSpace(){
 
 
 insertFileToDB(){
-#insertFileToDB ${constructId} ${biomassId} ${indexId} ${fcsURL} ${jsonURL} ${singleRawFileName} ${digestSHA256}
 
 	constructId=${1}
         biomassId=${2}
@@ -503,7 +502,7 @@ sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
 --	where filename='exptTest464.FCS'
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
-			    where name in ('retry','new')) limit 100;
+			    where name in ('retry')) limit 100;
 EOF
 
 

@@ -17,9 +17,10 @@ then
 	for readLine in $(cat ${TMPFILE})
 	do
 	#	echo ${readLine} | cut -d "_" -f3 | sort | uniq
-		echo "${QrySt} ${readLine} ,1);COMMIT;" >> BiomassLoad.sql	
+		echo "${QrySt} "${readLine}" ,1);COMMIT;" >> BiomassLoad.sql	
 	done
-
+	sudo su -c "psql ${DATABASE} < /home/ankotha/bin/BiomassLoad.sql" - ${GPCR_USER}
+	
 elif [ ${2} -eq 2 ]
 then
 	QrySt="insert into iobox_data.construct (id,target,site_prov) values("
@@ -32,8 +33,10 @@ then
         for readLine in $(cat ${TMPFILE})
         do
         #       echo ${readLine} | cut -d "_" -f3 | sort | uniq
-                echo "${QrySt} ${readLine} ,1,1);COMMIT;" >> TargetLoad.sql
+                echo "${QrySt} "${readLine}" ,1,1);COMMIT;" >> TargetLoad.sql
         done
+
+	sudo su -c "psql ${DATABASE} < /home/ankotha/bin/TargetLoad.sql" - ${GPCR_USER}
 fi
 
 
