@@ -168,16 +168,16 @@ explodeFCS()
 	
 	if [ $? -eq 0 ]
 	then
-		baseName="${baseFileName}.FCS"
-	
+		baseName="${baseFileName}.${extFCS}"
+		echo "BASENAME=======>"${baseName}	
 		cp "${dir}/${baseName}"* "${PROCESSED_DIR}"
 
 		if [ $? -eq 0 ]
 		then
 			for files in "${PROCESSED_DIR}/${baseName}"*".FCS"
 			do
-				echo "files in loop=" "${files}"
-				getFileName "${files}"
+				echo "files in loop=" "${files}" "${baseName}"
+				getFileName "${files}" ${baseName}
 			done
 	
 		else
@@ -191,7 +191,7 @@ explodeFCS()
 		return ${ERROR}
 
 	fi
-
+	echo "DONE===========>"
 	
 }
 
@@ -250,10 +250,12 @@ getFileName(){
 	echo "+++++++++++++++++Load File ${1} +++++++++++++++++" 	
 	singleRawFileName="${1}"
 	singleBaseFileName=$(basename "${singleRawFileName}" .FCS)
+	origBaseFile="${2}"
 	echo "SingleRawFileName="${singleRawFileName}	
+	echo "echo "${singleBaseFileName}" |  sed 's/${origBaseFile}//g'  | awk -F "_" '{print $2,$3,$4}'"
 	OIFS=${IFS}
 	IFS=' '
-	set -- $( echo "${singleBaseFileName}" | awk -F "_" '{print $2,$3,$4}' )
+	set -- $( echo "${singleBaseFileName}" |  sed "s/"${origBaseFile}"//g"  | awk -F "_" '{print $2,$3,$4}' )
 	IFS=${OIFS}
 	constructId=$(echo $1 | sed 's/[^0-9]*//g')
 	biomassId=$(echo $2 | sed 's/[^0-9]*//g')
@@ -504,10 +506,11 @@ sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
                end||','||
 	       filename
 	from ${ASSETS_SCHEMA}.fcs_source
---	where filename='exptTest464.FCS'
+--	where filename='expt_Test_765.FCS'
+--	where id between 3527 and 3535
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
-			    where name in ('retry','new')) limit 100;
+			    where name in ('retry','new')) limit 50;
 EOF
 
 
@@ -519,7 +522,8 @@ EOF
 		FCSmultiSHA=""
 		siteId=""
 		prefix=""
-		isErr="false"				
+		isErr="false"	
+		extFCS=""			
 
 		echo "In For loop " ${readLine}
 		OIFS=${IFS}
@@ -533,7 +537,21 @@ EOF
 		prefix=${4}
 		siteId=${5}
 		outFile="${6}"
+		extCheck=$(echo "${inputFileName}" | awk -F "." '{print $NF}')
 
+		if [ ${extCheck} == "FCS" ]
+		then
+			extFCS="FCS"
+		elif [ ${extCheck} == "fcs" ]
+		then
+			extFCS="fcs"
+		else
+			extFCS=""
+			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "5" "${FCSmultiSHA}" "${sha256}" "" "File not ending with .FCS or .fcs for filename:${inputFileName}"
+			
+		fi
+		
+		
 		
 #		baseFileName=$(basename ${inputFileName} .FCS)
 		FCSSingleSHA=""
@@ -541,13 +559,13 @@ EOF
 		ST=$(date +%s)		
 		getFiles=$(getHatracFiles "${inputFileName}" "${outFile}" )
 		ET=$(date +%s)
-		echo "Seconds to download the file ${inputFileName}" i$((ET-ST))
+		echo "Seconds to download the file ${inputFileName}" $((ET-ST))
 		
-		if [ ${getFiles} == "true" ]
+		if [ -n "${extFCS}"  -a ${getFiles} == "true" ]
 		then
 		
 			inputFileName="${IN_HATRAC_FILE_DIR}/${outFile}"
-			baseFileName=$(basename "${inputFileName}" .FCS)
+			baseFileName=$(basename "${inputFileName}" ".${extFCS}")
 			echo "AWK:" ${IN_HATRAC_FILE_DIR} ${inputFileName} ${siteName} ${FCSmultiSHA}
 			chkSize=$(checkFileSize "${inputFileName}")
 			echo "chksize="${chkSize}
