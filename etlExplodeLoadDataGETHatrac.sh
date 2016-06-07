@@ -176,6 +176,7 @@ explodeFCS()
 		then
 			for files in "${PROCESSED_DIR}/${baseName}"*".FCS"
 			do
+				SingleFileCount=$((${SingleFileCount}+1))
 				echo "files in loop=" "${files}" "${baseName}"
 				getFileName "${files}" ${baseName}
 			done
@@ -316,13 +317,19 @@ getFileName(){
 		else
 			isErr="retry"
 			echo "No entry in the DB found for construct biomass target. Check Error log for more detail"
+			SingleFailCount=$((${SingleFailCount}+1))
 			
 		fi
 	else
 		echo "error"
-		
-		isErr="error" 
+		if [ "${isErr}" == "retry" ]
+		then	
+			echo "keeping isErr value as is"
+		else
+			isErr="error" 
+		fi
 		echo "Null Values in Err for constructId biomassId indexId" ${constructId} ${biomassId} ${indexId}
+		SingleFailCount=$((${SingleFailCount}+1))
 		
 	fi
 
@@ -363,6 +370,7 @@ createHatracNameSpace(){
 			echo "${cId}, ${bId}, ${hatracFcsUrl}, error"
 			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac Error: ${response}"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "For URL: ${hatracURL} and File: ${hatracFile}"
 			isErr="retry"
+			SingleFailCount=$((${SingleFailCount}+1))
 			return ${ERROR}
 		fi
 	else
@@ -383,6 +391,7 @@ createHatracNameSpace(){
                         echo "${cId}, ${bId}, ${hatracJsonUrl}, error"
 			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac Error: ${response}"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "For URL: ${hatracURL} and File:  ${hatracFile}.json"
 			isErr="retry"
+			SingleFailCount=$((${SingleFailCount}+1))
 			return ${ERROR}
                 fi
 	else
@@ -456,12 +465,14 @@ EOF
 	then 
 		echo "Insert in ${ASSETS_SCHEMA}.fcs_stat, SUCCESS"
 		writeLog "${LOG_DIR}/${SUCCESS_LOG_NAME}" "0" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Data Loaded in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName}"
+		SingleSuccessCount=$((${SingleSuccessCount}+1))
 		                
 
 	else
 		echo "Insert in ${ASSETS_SCHEMA}.fcs_stat, error"
-		 writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "3" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error Loading data in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName}"
-		isErr="true"
+		SingleErrorCount=$((${SingleErrorCount}+1))
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "3" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error Loading data in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName}"
+		isErr="retry"
 		return ${ERROR}
 	fi
 
@@ -496,6 +507,14 @@ getHatracFiles(){
 
 
 #Main Starts from here
+#Variables for mail summary
+MultiFileCount=0
+SingleFileCount=0
+SingleSuccessCount=0
+MultiSuccessCount=0
+SingleFailCount=0
+MultiErrorCount=0
+MultiRetryCount=0
 
 sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
 	Select '${HATRAC_SERVER}'||uri||','||site||','||sha256||','||
@@ -510,7 +529,7 @@ sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
 --	where id between 3527 and 3535
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
-			    where name in ('retry','new')) limit 50;
+			    where name in ('new')) limit 5;
 EOF
 
 
@@ -524,7 +543,7 @@ EOF
 		prefix=""
 		isErr="false"	
 		extFCS=""			
-
+		
 		echo "In For loop " ${readLine}
 		OIFS=${IFS}
 	        IFS=' '
@@ -561,6 +580,7 @@ EOF
 		ET=$(date +%s)
 		echo "Seconds to download the file ${inputFileName}" $((ET-ST))
 		
+		MultiFileCount=$((${MultiFileCount}+1))
 		if [ -n "${extFCS}"  -a ${getFiles} == "true" ]
 		then
 		
@@ -576,16 +596,24 @@ EOF
 				if [ ${isErr} !=  "false" ]
 				then
 					errSt=${isErr} 
+					if [ -n "${errSt}" -a "${errSt}" == "retry" ]
+					then
+						MultiRetryCount=$((${MultiRetryCount}+1))
+					else
+						MultiErrorCount=$((${MultiErrorCount}+1))
+					fi
 				else
 					errSt="processed"
+					MultiSuccessCount=$((${MultiSuccessCount}+1))
 				fi
-	
+				
 				updateSourceStatusDB "${outFile}" ${errSt}
 				
 			fi
 		else
 			echo "error"
 			errSt="retry"
+			MultiRetryCount=$((${MultiRetryCount}+1))
 			updateSourceStatusDB ${outFile} ${errSt}
 
 		fi
@@ -593,3 +621,8 @@ EOF
 		echo "==================End Time for file ${readLine} is " $((ETM-STM)) "====================="
 	done
 
+
+avgSinglePerMulit=`echo ${SingleFileCount}/${MultiFileCount} | bc -l`
+avgSuccesPerMultiFile=`echo ${SingleSuccessCount}/${MultiFileCount} | bc -l`
+avgErrorPerMultiFile=`echo ${SingleFailCount}/${MultiFileCount} | bc -l`
+echo -e "=============Summary============= \nTotal Multi Files Processes : ${MultiFileCount} \nTotal Multi Files Success : ${MultiSuccessCount} \nTotal Multi Files Retry : ${MultiRetryCount} \nTotal Multi Files Error : ${MultiErrorCount} \nTotal Single Files : ${SingleFileCount} \nTotal Single Files Success : ${SingleSuccessCount} \nTotal Single Files Fail : ${SingleFailCount} \nAverage Single File per Multi File : ${avgSinglePerMulit} \nAverage Success File per Multi File : ${avgSuccesPerMultiFile} \nAvergae Error/Retry File per Multi File : ${avgErrorPerMultiFile}" | mailx -s "Loading status for: `date` " ankit@isi.edu
