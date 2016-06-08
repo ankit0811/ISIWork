@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #Importing hatrac_util.sh file
-. /home/ankotha/git/gpcr-project/etl-scripts/hatrac_util_mod.sh
+. /home/ankotha/git/gpcr-project/etl-scripts/hatrac_util.sh
 
 DATABASE=ermrest
 GPCR_USER=ermrest  #gpcr_policy
@@ -10,8 +10,9 @@ IOBOX_SCHEMA=iobox_data
 
 LOG_DIR=/home/ankotha/logs
 SUCCESS_LOG_NAME=Success.log
+SUCCESS_MULTI_LOG_NAME=MultiFCS_Success.log
 ERROR_LOG_NAME=Error.log
-
+ERROR_MULTI_LOG_NAME=MultiFCS_Error.log
 
 INPUT_DIR=/bulk/FCS_DATA/USC/FCS_processed
 PROCESSED_FILES=/home/ankotha/processedFiles
@@ -23,12 +24,20 @@ HATRAC_SERVER=https://gpcr-expt01.misd.isi.edu
 HATRAC_ROOT=/hatrac
 TEMP_FILE_SOURCE=inputSourceFile.csv
 ROOT_FOLDER=""
-ERROR=1
-: 'ERRORCODE=1 #Empty File
- 	    =2 #Variable Not Assigned
-	    =3 #Could not insert into the DB
-	    =4 #No entry found in the DB
+ERROR=91
+: 'ERRORCODE=91 #Empty File
+ 	    =92 #Variable Not Assigned
+	    =93 #Could not insert into the DB
+	    =94 #No entry found in the DB
+	    =95 #File not ending in .FCS or .fcs
 '
+
+RETRYCODE="retry"
+ERRORCODE="error"
+PROCESSEDCODE="processed"
+NEWCODE="new"
+TRUE="true"
+FALSE="false"
 
 
 : '
@@ -79,10 +88,10 @@ checkNullValue(){
  	
 	if [ -n "${value}" ]
 	then
-		echo true
+		echo ${TRUE}
 	else
-		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "2" "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "Unable to set the value for variable ${name} from file: ${files} ."
-		echo false
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 92" "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "Unable to set the value for variable ${name} from file: ${files} ."
+		echo ${FALSE}
 	fi
 	
 }
@@ -95,11 +104,11 @@ checkFileSize(){
 	
 	if [ -n ${fileSize} -a ${fileSize} -gt 0 ]
 	then
-		echo true	
+		echo ${TRUE}	
  	
 	else
-		echo false
-		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "1"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "No Source File To Load In File ${srcFile}. Exiting"
+		echo ${FALSE}
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 91"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "No Source File To Load In File ${srcFile}. Exiting"
 	
 	fi
 	
@@ -123,10 +132,10 @@ EOF
 ) 
 	if [ -n ${count} -a ${count} -gt 0 ]
 	then
-		echo "true"
+		echo "${TRUE}"
 	else
-		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "4"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "No value exist for the table ${tabName} and id ${colValue} for file: ${files}"			
-		echo "false"
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 94"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "No value exist for the table ${tabName} and id ${colValue} for file: ${files}"			
+		echo "${FALSE}"
 	fi
 	
 }
@@ -178,17 +187,25 @@ explodeFCS()
 			do
 				SingleFileCount=$((${SingleFileCount}+1))
 				echo "files in loop=" "${files}" "${baseName}"
-				getFileName "${files}" ${baseName}
+				getSingleSize=$(checkFileSize "${files}")
+				if [ "${getSingleSize}" == "${TRUE}"  ]
+				then
+					getFileName "${files}" ${baseName}
+				else
+					SingleEmptyFile=$((${SingleEmptyFile}+1))
+					writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 95"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "Empty file generated for filename: ${files}"
+				fi
+				
 			done
 	
 		else
 
 			echo "error Failed to copy the tmp files to processed all  dir"
-			isErr="retry" 
+			isErr="${RETRYCODE}" 
 		fi
 	else
 		echo "error in exploding files"
-		isErr="retry"
+		isErr="${RETRYCODE}"
 		return ${ERROR}
 
 	fi
@@ -214,9 +231,9 @@ EOF
 	then
 		if [ ${existingCount} -gt 0 ]
 		then
-			echo true
+			echo ${TRUE}
 		else
-			echo false
+			echo ${FALSE}
 		fi
 	else
 		return ${ERROR}
@@ -253,7 +270,7 @@ getFileName(){
 	singleBaseFileName=$(basename "${singleRawFileName}" .FCS)
 	origBaseFile="${2}"
 	echo "SingleRawFileName="${singleRawFileName}	
-	echo "echo "${singleBaseFileName}" |  sed 's/${origBaseFile}//g'  | awk -F "_" '{print $2,$3,$4}'"
+#	echo "echo "${singleBaseFileName}" |  sed 's/${origBaseFile}//g'  | awk -F "_" '{print $2,$3,$4}'"
 	OIFS=${IFS}
 	IFS=' '
 	set -- $( echo "${singleBaseFileName}" |  sed "s/"${origBaseFile}"//g"  | awk -F "_" '{print $2,$3,$4}' )
@@ -269,9 +286,11 @@ getFileName(){
 
 		 if [ ! -n "${targetId}"  ]
 	        then
-        	        isErr="retry"
+        	        isErr="${RETRYCODE}"
                 	echo "error"
-	                 writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "4"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "Could Not set Value for TargetId for constructId=${constructId} for the file: ${files}"
+	                writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 94"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "Could Not set Value for TargetId for constructId=${constructId} for the file: ${files}"
+			SingleFailCount=$((${SingleFailCount}+1))
+			MultiSingleFileError=$((${MultiSingleFileError}+1))
         	        return ${ERROR}
 	        fi
 
@@ -287,16 +306,16 @@ getFileName(){
 	FCSSingleSHA=${digestSHA256}
 	
 	
-	if [ $(checkNullValue "${constructId}" constructId) == "true" -a $(checkNullValue "${biomassId}" biomassId) == "true" -a $(checkNullValue "${indexId}" indexId) == "true" ]
+	if [ $(checkNullValue "${constructId}" constructId) == "${TRUE}" -a $(checkNullValue "${biomassId}" biomassId) == "${TRUE}" -a $(checkNullValue "${indexId}" indexId) == "${TRUE}" ]
 	then
 		
-		if [ $(checkValuesDB ${IOBOX_SCHEMA}.construct ${constructId}) == "true" -a $(checkValuesDB ${IOBOX_SCHEMA}.biomassprodbatch ${biomassId} ${constructId}) == "true" ]		
+		if [ $(checkValuesDB ${IOBOX_SCHEMA}.construct ${constructId}) == "${TRUE}" -a $(checkValuesDB ${IOBOX_SCHEMA}.biomassprodbatch ${biomassId} ${constructId}) == "${TRUE}" ]		
 		then
 
 			digestSHA256=$(sha256sum "${singleRawFileName}" | cut -d ' ' -f1)
 			checkDigestSHA256=$(getDigestfromDB ${digestSHA256})
 			echo ${checkDigestSHA256}	
-			if [ ${checkDigestSHA256} == false ]
+			if [ ${checkDigestSHA256} == ${FALSE} ]
 			then
 				URL=${HATRAC_ROOT}/target/${targetId}/construct/${prefix}"-"${constructId}/biomass/${prefix}"-"${biomassId}/${singleBaseFileName}
 	                        fcsURL=${URL}.FCS
@@ -307,29 +326,34 @@ getFileName(){
 				if [ $? -eq 0 ]
 				then
 					echo "Hatrac name Space create, SUCCESS"
-				 	echo "singleRawFileName="${singleRawFileName}		
+				 	echo "singleRawFileName="${singleRawFileName}
+					####case to be handeled : file successfull in hatrac but failed to insert in the DB ::DONE
 					insertFileToDB "${constructId}" "${biomassId}" "${indexId}" "${fcsURL}" "${jsonURL}" "${singleRawFileName}" "${digestSHA256}"
-	
 				fi
+			
 			else
-				echo "File already exists"
+				echo "File already exists in the DB"
+				SingleFileAlreadyExists=$((${SingleFileAlreadyExists}+1))
+				MultiSingleFileError=$((${MultiSingleFileError}+1))
 			fi
 		else
-			isErr="retry"
+			isErr="${RETRYCODE}"
 			echo "No entry in the DB found for construct biomass target. Check Error log for more detail"
 			SingleFailCount=$((${SingleFailCount}+1))
+			MultiSingleFileError=$((${MultiSingleFileError}+1))
 			
 		fi
 	else
 		echo "error"
-		if [ "${isErr}" == "retry" ]
+		if [ "${isErr}" == "${RETRYCODE}" ]
 		then	
 			echo "keeping isErr value as is"
 		else
-			isErr="error" 
+			isErr="${ERRORCODE}" 
 		fi
 		echo "Null Values in Err for constructId biomassId indexId" ${constructId} ${biomassId} ${indexId}
 		SingleFailCount=$((${SingleFailCount}+1))
+		MultiSingleFileError=$((${MultiSingleFileError}+1))
 		
 	fi
 
@@ -369,13 +393,16 @@ createHatracNameSpace(){
 		else
 			echo "${cId}, ${bId}, ${hatracFcsUrl}, error"
 			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac Error: ${response}"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "For URL: ${hatracURL} and File: ${hatracFile}"
-			isErr="retry"
+			isErr="${RETRYCODE}"
 			SingleFailCount=$((${SingleFailCount}+1))
-			return ${ERROR}
+			MultiSingleFileError=$((${MultiSingleFileError}+1))
+			return ${response}
 		fi
 	else
 		echo "error FCS empty"
-		isErr="retry"
+		isErr="${RETRYCODE}"
+		ERROR=91
+		return ${ERROR}
 	fi
 
         hatracJsonUrl="${hatracURL}.json"
@@ -390,13 +417,15 @@ createHatracNameSpace(){
                 else
                         echo "${cId}, ${bId}, ${hatracJsonUrl}, error"
 			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac Error: ${response}"  "${FCSmultiSHA}" "${FCSSingleSHA}" "${RowID}" "For URL: ${hatracURL} and File:  ${hatracFile}.json"
-			isErr="retry"
+			isErr="${RETRYCODE}"
 			SingleFailCount=$((${SingleFailCount}+1))
-			return ${ERROR}
+			MultiSingleFileError=$((${MultiSingleFileError}+1))
+			return ${response}
                 fi
 	else
 		echo "error json empty"
-		isErr="retry"
+		isErr="${RETRYCODE}"
+		ERROR=91
 		return ${ERROR}
 
         fi
@@ -417,8 +446,12 @@ insertFileToDB(){
 	fileName="${OrigFileName}.csv"
 	echo "filename="${fileName}
 	echo "FILENAME=====>"${6} "SHA=====>" ${7}
-	sudo su -c "psql ${DATABASE}" - ${GPCR_USER} << EOF
-	
+
+
+
+
+	sudo su -c "psql ${DATABASE} " - ${GPCR_USER} <<EOF	
+
         insert into ${ASSETS_SCHEMA}.fcs_file(site_id,construct_id,biomass_id,well_id,fcs_uri,json_uri,sha256)
         Select s.id,
         '${constructId}',
@@ -446,7 +479,7 @@ insertFileToDB(){
         count text
         );
 
-	COPY  stat_temp(percent_total,mean,median,max,min,count) from '${fileName}' WITH CSV HEADER;
+	\COPY  stat_temp(percent_total,mean,median,max,min,count) from '${fileName}' WITH CSV HEADER;
 
 	Insert into ${ASSETS_SCHEMA}.fcs_stats(quadrant,fcs_file,percent_total,mean,median,max,min,count)
 	Select quadrant,
@@ -458,21 +491,23 @@ insertFileToDB(){
         case when upper(trim(min)) in ('NAN','') then null else round(trim(min)::numeric,2) end min,
         case when upper(trim(count)) in ('NAN','') then null else trim(count)::integer end count
         from stat_temp;
-
 EOF
 
-	if [ $? -eq 0 ]
+	execResponse=$?
+	if [ ${execResponse}  -eq 0 ]
 	then 
 		echo "Insert in ${ASSETS_SCHEMA}.fcs_stat, SUCCESS"
 		writeLog "${LOG_DIR}/${SUCCESS_LOG_NAME}" "0" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Data Loaded in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName}"
 		SingleSuccessCount=$((${SingleSuccessCount}+1))
+		MultiSingleFileSuccess=$((${MultiSingleFileSuccess}+1))
 		                
 
 	else
 		echo "Insert in ${ASSETS_SCHEMA}.fcs_stat, error"
 		SingleErrorCount=$((${SingleErrorCount}+1))
-		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "3" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error Loading data in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName}"
-		isErr="retry"
+		MultiSingleFileError=$((${MultiSingleFileError}+1))
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 93 " "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error Loading data in Tables : ${ASSETS_SCHEMA}.fcs_file,${ASSETS_SCHEMA}.fcs_stats Data From: ${fileName} with error code ${execResponse}"
+		isErr="${RETRYCODE}"
 		return ${ERROR}
 	fi
 
@@ -483,20 +518,21 @@ EOF
 
 
 getHatracFiles(){
-	
+#####create a utility function for this with header checks	:: Done
 	
 	URI="${1}"
 	outFile="${2}"
 
-	curl -f -b cookie -c cookie -X GET "${URI}" --output "${IN_HATRAC_FILE_DIR}/${outFile}"
+#	curl -f -b cookie -c cookie -X GET "${URI}" --output "${IN_HATRAC_FILE_DIR}/${outFile}"
+	execVal=$(bash /home/ankotha/git/gpcr-project/etl-scripts/r_get_hatrac_files_util.sh "${URI}" "${IN_HATRAC_FILE_DIR}/${outFile}")
 	cmdStatus=$?
 	if [ ${cmdStatus} -eq 0 ]
 	then
-		 echo "true"
+		 echo "${TRUE}"
 		
 	else
-		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac GET error : 1" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error in GET from hatrac system for ${URI}"
-		echo "false" 
+		writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Hatrac GET Error : ${cmdStatus}" "${FCSmultiSHA}" "${sha256}" "${indexId}" "Error in GET from hatrac system for ${URI}"
+		echo "${FALSE}" 
 	fi
 	
 	
@@ -515,21 +551,26 @@ MultiSuccessCount=0
 SingleFailCount=0
 MultiErrorCount=0
 MultiRetryCount=0
+SingleFileAlreadyExists=0
+SingleEmptyFile=0
+MultiSingleFileSuccess=0
+MultiSingleFileError=0
 
+#####Join with site table ::DONE
 sudo su -c "psql -A -t ${DATABASE}" - ${GPCR_USER} <<EOF > ${TEMP_FILE_SOURCE}
-	Select '${HATRAC_SERVER}'||uri||','||site||','||sha256||','||
-	       case when site = 'USC' then 'IMPT,1'
-               	    when site = 'iHuman' then 'HUMM,2'
-                    when site = 'SIMM' then 'SIMM,3'
-		    else 'Error,-1'
-               end||','||
-	       filename
-	from ${ASSETS_SCHEMA}.fcs_source
---	where filename='expt_Test_765.FCS'
+	    Select '${HATRAC_SERVER}'||uri||','||site||','||sha256||','||
+               case when site = 'USC' then 'IMPT'
+                    when site = 'iHuman' then 'HUMM'
+                    when site = 'SIMM' then 'SIMM'
+                    else 'Error'
+               end||','||b.id||','||
+               filename
+        from assets.fcs_source a inner join iobox_data.site b on (a.site=b.name)
+--	where filename='expttest772.fcs'
 --	where id between 3527 and 3535
 	where status_id in (Select id 
 			    from ${ASSETS_SCHEMA}.asset_status 
-			    where name in ('new')) limit 5;
+			    where name in ('${NEWCODE}','${RETRYCODE}')) limit 5;
 EOF
 
 
@@ -541,7 +582,7 @@ EOF
 		FCSmultiSHA=""
 		siteId=""
 		prefix=""
-		isErr="false"	
+		isErr="${FALSE}"	
 		extFCS=""			
 		
 		echo "In For loop " ${readLine}
@@ -556,8 +597,9 @@ EOF
 		prefix=${4}
 		siteId=${5}
 		outFile="${6}"
-		extCheck=$(echo "${inputFileName}" | awk -F "." '{print $NF}')
-
+		echo "inputFileName="${inputFileName}
+		extCheck=$(echo "${outFile}" | awk -F "." '{print $NF}')
+		echo "extCheck="${extCheck}
 		if [ ${extCheck} == "FCS" ]
 		then
 			extFCS="FCS"
@@ -566,13 +608,13 @@ EOF
 			extFCS="fcs"
 		else
 			extFCS=""
-			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "5" "${FCSmultiSHA}" "${sha256}" "" "File not ending with .FCS or .fcs for filename:${inputFileName}"
+			writeLog "${LOG_DIR}/${ERROR_LOG_NAME}" "Error : 95" "${FCSmultiSHA}" "${sha256}" "" "File not ending with .FCS or .fcs for filename:${inputFileName}"
 			
 		fi
+		echo "extFCS="${extFCS}	
 		
-		
-		
-#		baseFileName=$(basename ${inputFileName} .FCS)
+		MultiSingleFileSuccess=0
+		MultiSingleFileError=0
 		FCSSingleSHA=""
 		RowId=""
 		ST=$(date +%s)		
@@ -581,30 +623,32 @@ EOF
 		echo "Seconds to download the file ${inputFileName}" $((ET-ST))
 		
 		MultiFileCount=$((${MultiFileCount}+1))
-		if [ -n "${extFCS}"  -a ${getFiles} == "true" ]
+		if [ -n "${extFCS}"  -a ${getFiles} == "${TRUE}" ]
 		then
 		
 			inputFileName="${IN_HATRAC_FILE_DIR}/${outFile}"
 			baseFileName=$(basename "${inputFileName}" ".${extFCS}")
-			echo "AWK:" ${IN_HATRAC_FILE_DIR} ${inputFileName} ${siteName} ${FCSmultiSHA}
 			chkSize=$(checkFileSize "${inputFileName}")
-			echo "chksize="${chkSize}
-			if [ ${chkSize} == true ]
+			if [ ${chkSize} == ${TRUE} ]
 			then
 				explodeFCS "${inputFileName}" "${baseFileName}" 
 	
-				if [ ${isErr} !=  "false" ]
+				if [ ${isErr} !=  "${FALSE}" ]
 				then
 					errSt=${isErr} 
-					if [ -n "${errSt}" -a "${errSt}" == "retry" ]
+					if [ -n "${errSt}" -a "${errSt}" == "${RETRYCODE}" ]
 					then
 						MultiRetryCount=$((${MultiRetryCount}+1))
+						writeLog "${LOG_DIR}/${ERROR_MULTI_LOG_NAME}" "Error Code : 3" "${FCSmultiSHA}" "${MultiSingleFileSuccess}" "${MultiSingleFileError}" "The exploded files for multifile ${inputFileName} have ConstructId/BiomassId/TargetId which are not present in the respective tables "
 					else
 						MultiErrorCount=$((${MultiErrorCount}+1))
+						writeLog "${LOG_DIR}/${ERROR_MULTI_LOG_NAME}" "Error Code : 4" "${FCSmultiSHA}" "${MultiSingleFileSuccess}" "${MultiSingleFileError}" "The exploded files for multifile ${inputFileName} have incorrect file name. The exploded filename should be of the form filename_ConstructId_BiomassId_IndexId.FCS"
+
 					fi
 				else
-					errSt="processed"
+					errSt="${PROCESSEDCODE}"
 					MultiSuccessCount=$((${MultiSuccessCount}+1))
+					writeLog "${LOG_DIR}/${SUCCESS_MULTI_LOG_NAME}" "0" "${FCSmultiSHA}" "${MultiSingleFileSuccess}" "${MultiSingleFileError}" "The exploded files for multifile ${inputFileName} are successfully loaded"
 				fi
 				
 				updateSourceStatusDB "${outFile}" ${errSt}
@@ -612,7 +656,7 @@ EOF
 			fi
 		else
 			echo "error"
-			errSt="retry"
+			errSt="${RETRYCODE}"
 			MultiRetryCount=$((${MultiRetryCount}+1))
 			updateSourceStatusDB ${outFile} ${errSt}
 
@@ -625,4 +669,4 @@ EOF
 avgSinglePerMulit=`echo ${SingleFileCount}/${MultiFileCount} | bc -l`
 avgSuccesPerMultiFile=`echo ${SingleSuccessCount}/${MultiFileCount} | bc -l`
 avgErrorPerMultiFile=`echo ${SingleFailCount}/${MultiFileCount} | bc -l`
-echo -e "=============Summary============= \nTotal Multi Files Processes : ${MultiFileCount} \nTotal Multi Files Success : ${MultiSuccessCount} \nTotal Multi Files Retry : ${MultiRetryCount} \nTotal Multi Files Error : ${MultiErrorCount} \nTotal Single Files : ${SingleFileCount} \nTotal Single Files Success : ${SingleSuccessCount} \nTotal Single Files Fail : ${SingleFailCount} \nAverage Single File per Multi File : ${avgSinglePerMulit} \nAverage Success File per Multi File : ${avgSuccesPerMultiFile} \nAvergae Error/Retry File per Multi File : ${avgErrorPerMultiFile}" | mailx -s "Loading status for: `date` " ankit@isi.edu
+echo -e "=============Summary============= \nTotal Multi Files Processes : ${MultiFileCount} \nTotal Multi Files Success : ${MultiSuccessCount} \nTotal Multi Files Retry : ${MultiRetryCount} \nTotal Multi Files Error : ${MultiErrorCount} \nTotal Single Files : ${SingleFileCount} \nTotal Single Files Success : ${SingleSuccessCount} \nTotal Single Files Fail : ${SingleFailCount} \nSingle File Already Exist : ${SingleFileAlreadyExists} \nSingle File Empty : ${SingleEmptyFile}\nAverage Single File per Multi File : ${avgSinglePerMulit} \nAverage Success File per Multi File : ${avgSuccesPerMultiFile} \nAvergae Error/Retry File per Multi File : ${avgErrorPerMultiFile}" # | mailx -s "Loading status for: `date` " ankit@isi.edu
